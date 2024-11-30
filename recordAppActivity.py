@@ -10,6 +10,7 @@ import win32process
 from PIL import Image, ImageDraw
 from openpyxl.utils import get_column_letter
 from pystray import Icon, MenuItem as item
+from datetime import datetime
 
 # Path to the log file
 log_file_path = "app_usage_log.xlsx"
@@ -18,6 +19,8 @@ log_file_path = "app_usage_log.xlsx"
 usage_records = {}
 
 sleepingTime = 2
+
+sleepingTimeWriteToFile = 10
 
 # Global flag to stop threads
 stop_threads = False
@@ -41,7 +44,7 @@ def format_duration(seconds):
 
 
 # Function to log app usage
-def log_usage(app_name, app_title, start_time, end_time, duration):
+def log_usage(app_name, app_title, duration):
     global usage_records
     key = (app_name, app_title)  # Use a tuple as the key
     if key in usage_records:
@@ -69,7 +72,7 @@ def write_to_file():
 
                     # Populate consolidated_records with data from the file
                     for row in ws.iter_rows(min_row=2, values_only=True):  # Skip the header row
-                        app_name, app_title, duration = row
+                        app_name, app_title, duration, timestamp = row
                         if app_name and app_title:
                             # Convert duration from HH:MM:SS to seconds
                             hours, minutes, seconds = map(int, duration.split(':'))
@@ -84,7 +87,7 @@ def write_to_file():
                     wb = openpyxl.Workbook()
                     ws = wb.active
                     ws.title = "App Usage Log"
-                    ws.append(["App Name", "App Title", "Duration"])  # Add headers
+                    ws.append(["App Name", "App Title", "Duration", "Timestamp"])  # Add headers
 
                 # Merge in-memory records with consolidated records
                 for (app_name, app_title), duration in usage_records.items():
@@ -97,7 +100,8 @@ def write_to_file():
                 # Write consolidated records back to the file
                 ws.delete_rows(2, ws.max_row)  # Clear existing data but keep the headers
                 for (app_name, app_title), total_duration in consolidated_records.items():
-                    ws.append([app_name, app_title, format_duration(total_duration)])
+                    timestamp = datetime.now().strftime("%m %H:%M")  # Month, Hour:Minute
+                    ws.append([app_name, app_title, format_duration(total_duration), timestamp])
 
                 # Autofit columns
                 for col in ws.columns:
@@ -114,15 +118,12 @@ def write_to_file():
 
                 # Save the updated workbook
                 wb.save(log_file_path)
-                print(f"[INFO] Records written to {log_file_path}")
+                #print(f"[INFO] Records written to {log_file_path}")
             except PermissionError:
                 print(f"[Warning] Unable to write to {log_file_path}. Retrying...")
-        time.sleep(sleepingTime)
+        time.sleep(sleepingTimeWriteToFile)
 
 
-
-
-# Function to track app usage
 def track_app_usage():
     last_app = None
     last_title = None
@@ -137,28 +138,62 @@ def track_app_usage():
                 _, process_id = win32process.GetWindowThreadProcessId(hwnd)
                 process = psutil.Process(process_id)
                 current_app = process.name()
-                current_title = win32gui.GetWindowText(hwnd)
+                #current_title = win32gui.GetWindowText(hwnd)
+                current_title = truncate_title(win32gui.GetWindowText(hwnd))
             else:
                 current_app, current_title = "Unknown", "No Active Window"
 
+            current_time = time.time()
+
+            # Initialize tracking for the first app
+            if start_time is None:
+                last_app = current_app
+                last_title = current_title
+                start_time = current_time
+                continue
+
             # Detect app switch
             if current_app != last_app or current_title != last_title:
-                if last_app and start_time:
-                    # Calculate usage duration
-                    end_time = time.time()
-                    duration = end_time - start_time
-                    log_usage(last_app, last_title, time.ctime(start_time), time.ctime(end_time), duration)
+                # Calculate usage duration when app switches
+                duration = current_time - start_time
+                if duration > 0:  # Ensure the duration is positive and valid
+                    log_usage(last_app, last_title, duration)
 
                 # Update last app details
                 last_app = current_app
                 last_title = current_title
-                start_time = time.time()
+                start_time = current_time
 
-            # Sleep for a longer duration to save power (adjust as needed)
+            # Sleep for a consistent interval
             time.sleep(sleepingTime)
+
         except Exception as e:
             print(f"[Error] {e}")
-            time.sleep(sleepingTime)  # Retry after 5 seconds
+            time.sleep(sleepingTime)  # Retry after sleeping
+
+    # Log final usage when thread stops
+    if last_app and start_time:
+        final_duration = time.time() - start_time
+        if final_duration > 0:
+            log_usage(last_app, last_title, final_duration)
+
+def truncate_title(title, max_length=50):
+    """
+    Truncate the window title to a specified maximum length.
+    If the title is longer, it will be cut and end with an ellipsis.
+
+    :param title: Original window title
+    :param max_length: Maximum allowed length of the title
+    :return: Truncated title
+    """
+    if not title:
+        return title
+
+    if len(title) <= max_length:
+        return title
+
+    # Truncate and add ellipsis
+    return title[:max_length-3] + "..."
 
 # Create a system tray icon
 def create_image(width, height, color1, color2):
