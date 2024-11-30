@@ -1,35 +1,34 @@
-import time
-import csv
 import os
-import psutil
-import pygetwindow as gw
-from pystray import Icon, MenuItem as item
-from PIL import Image, ImageDraw
+import signal
+import time
 from threading import Thread
+
+import openpyxl
+import psutil
 import win32gui
 import win32process
-import signal
-import sys
-import msvcrt
+from PIL import Image, ImageDraw
+from openpyxl.utils import get_column_letter
+from pystray import Icon, MenuItem as item
 
 # Path to the log file
-log_file_path = "app_usage_log.csv"
+log_file_path = "app_usage_log.xlsx"
 
 # Initialize usage records
-usage_records = []
+usage_records = {}
 
 sleepingTime = 2
 
 # Global flag to stop threads
 stop_threads = False
 
-# Signal handler for Ctrl + C
 def signal_handler(sig, frame):
     global stop_threads
     print("\n[INFO] Stopping application...")
     stop_threads = True
     icon.stop()  # Stop the system tray icon
-    sys.exit(0)
+    # Allow threads to exit naturally without calling sys.exit()
+
 
 # Register the signal handler for Ctrl + C
 signal.signal(signal.SIGINT, signal_handler)
@@ -40,30 +39,87 @@ def format_duration(seconds):
     minutes, seconds = divmod(seconds, 60)
     return f"{int(hours):02}:{int(minutes):02}:{int(seconds):02}"
 
-# Function to write usage data to the file periodically
-def write_to_file():
-    global usage_records, stop_threads
-    while not stop_threads:  # Check stop_threads flag
-        if usage_records:
-            try:
-                with open(log_file_path, mode='a', newline='') as file:
-                    # Enable shared access for the file
-                    msvcrt.locking(file.fileno(), msvcrt.LK_NBLCK, 1)
-                    writer = csv.writer(file)
-                    writer.writerows(usage_records)
-                    usage_records = []  # Clear records after writing
-                    msvcrt.locking(file.fileno(), msvcrt.LK_UNLCK, 1)
-            except PermissionError:
-                print(f"[Warning] Unable to write to {log_file_path}. Retrying...")
-            except OSError as e:
-                print(f"[Error] OS Error: {e}")
-        time.sleep(sleepingTime)  # Write every 2 seconds
 
 # Function to log app usage
 def log_usage(app_name, app_title, start_time, end_time, duration):
-    formatted_duration = format_duration(duration)
-    usage_records.append([app_name, app_title, formatted_duration, start_time, end_time])
-    print(f"Logged: {app_name}, {app_title}")
+    global usage_records
+    key = (app_name, app_title)  # Use a tuple as the key
+    if key in usage_records:
+        # Update the duration for existing records
+        usage_records[key] += duration
+    else:
+        # Add a new record
+        usage_records[key] = duration
+    print(f"Logged: {app_name}, {app_title}, Total Duration: {format_duration(usage_records[key])}")
+
+
+
+def write_to_file():
+    global usage_records, stop_threads
+    while not stop_threads:
+        if usage_records:
+            try:
+                consolidated_records = {}
+
+                # Check if the file exists
+                if os.path.exists(log_file_path):
+                    # Load the workbook and read existing data
+                    wb = openpyxl.load_workbook(log_file_path)
+                    ws = wb.active
+
+                    # Populate consolidated_records with data from the file
+                    for row in ws.iter_rows(min_row=2, values_only=True):  # Skip the header row
+                        app_name, app_title, duration = row
+                        if app_name and app_title:
+                            # Convert duration from HH:MM:SS to seconds
+                            hours, minutes, seconds = map(int, duration.split(':'))
+                            duration_in_seconds = hours * 3600 + minutes * 60 + seconds
+                            key = (app_name, app_title)
+                            if key in consolidated_records:
+                                consolidated_records[key] += duration_in_seconds
+                            else:
+                                consolidated_records[key] = duration_in_seconds
+                else:
+                    # Create a new file if it doesn't exist
+                    wb = openpyxl.Workbook()
+                    ws = wb.active
+                    ws.title = "App Usage Log"
+                    ws.append(["App Name", "App Title", "Duration"])  # Add headers
+
+                # Merge in-memory records with consolidated records
+                for (app_name, app_title), duration in usage_records.items():
+                    key = (app_name, app_title)
+                    if key in consolidated_records:
+                        consolidated_records[key] += duration
+                    else:
+                        consolidated_records[key] = duration
+
+                # Write consolidated records back to the file
+                ws.delete_rows(2, ws.max_row)  # Clear existing data but keep the headers
+                for (app_name, app_title), total_duration in consolidated_records.items():
+                    ws.append([app_name, app_title, format_duration(total_duration)])
+
+                # Autofit columns
+                for col in ws.columns:
+                    max_length = 0
+                    col_letter = get_column_letter(col[0].column)  # Get column letter
+                    for cell in col:
+                        try:
+                            if cell.value:
+                                max_length = max(max_length, len(str(cell.value)))
+                        except:
+                            pass
+                    adjusted_width = max_length + 2  # Add some padding
+                    ws.column_dimensions[col_letter].width = adjusted_width
+
+                # Save the updated workbook
+                wb.save(log_file_path)
+                print(f"[INFO] Records written to {log_file_path}")
+            except PermissionError:
+                print(f"[Warning] Unable to write to {log_file_path}. Retrying...")
+        time.sleep(sleepingTime)
+
+
 
 
 # Function to track app usage
