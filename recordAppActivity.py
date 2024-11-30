@@ -8,12 +8,17 @@ from PIL import Image, ImageDraw
 from threading import Thread
 import win32gui
 import win32process
+import signal
+import sys
+import msvcrt
 
 # Path to the log file
 log_file_path = "app_usage_log.csv"
 
 # Initialize usage records
 usage_records = []
+
+sleepingTime = 2
 
 # Global flag to stop threads
 stop_threads = False
@@ -26,6 +31,9 @@ def signal_handler(sig, frame):
     icon.stop()  # Stop the system tray icon
     sys.exit(0)
 
+# Register the signal handler for Ctrl + C
+signal.signal(signal.SIGINT, signal_handler)
+
 # Function to format duration as HH:MM:SS
 def format_duration(seconds):
     hours, seconds = divmod(seconds, 3600)
@@ -33,8 +41,6 @@ def format_duration(seconds):
     return f"{int(hours):02}:{int(minutes):02}:{int(seconds):02}"
 
 # Function to write usage data to the file periodically
-import msvcrt
-
 def write_to_file():
     global usage_records, stop_threads
     while not stop_threads:  # Check stop_threads flag
@@ -51,7 +57,7 @@ def write_to_file():
                 print(f"[Warning] Unable to write to {log_file_path}. Retrying...")
             except OSError as e:
                 print(f"[Error] OS Error: {e}")
-        time.sleep(10)  # Write every 10 seconds
+        time.sleep(sleepingTime)  # Write every 2 seconds
 
 # Function to log app usage
 def log_usage(app_name, app_title, start_time, end_time, duration):
@@ -66,7 +72,7 @@ def track_app_usage():
     last_title = None
     start_time = None
 
-    while True:
+    while not stop_threads:
         try:
             # Get the handle of the foreground window
             hwnd = win32gui.GetForegroundWindow()
@@ -93,10 +99,10 @@ def track_app_usage():
                 start_time = time.time()
 
             # Sleep for a longer duration to save power (adjust as needed)
-            time.sleep(5)
+            time.sleep(sleepingTime)
         except Exception as e:
             print(f"[Error] {e}")
-            time.sleep(5)  # Retry after 5 seconds
+            time.sleep(sleepingTime)  # Retry after 5 seconds
 
 # Create a system tray icon
 def create_image(width, height, color1, color2):
@@ -130,4 +136,9 @@ menu = (
 )
 icon_image = create_image(64, 64, 'black', 'red')
 icon = Icon("App Tracker", icon_image, "App Usage Tracker", menu)
-icon.run(setup)
+
+# Run the system tray icon
+try:
+    icon.run(setup)
+except Exception as e:
+    print(f"[Error] {e}")
