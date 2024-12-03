@@ -150,7 +150,12 @@ def track_app_usage():
                 _, process_id = win32process.GetWindowThreadProcessId(hwnd)
                 process = psutil.Process(process_id)
                 current_app = process.name()
-                current_title = win32gui.GetWindowText(hwnd)
+                current_title = truncate_title(win32gui.GetWindowText(hwnd))
+
+                # Check if YouTube or Netflix is open on Chrome, exclude idle time in this case
+                if 'chrome' in current_app.lower() and ('youtube' in current_title.lower() or 'netflix' in current_title.lower()):
+                    idle_time = 0  # Reset idle time when YouTube/Netflix is open
+
             else:
                 current_app, current_title = "Unknown", "No Active Window"
 
@@ -195,6 +200,17 @@ def log_usage(app_name, app_title, duration):
         else:
             usage_records[key] = duration
 
+
+
+def truncate_title(title, max_length=50):
+    """Truncate the window title to a specified maximum length."""
+    if not title:
+        return title
+
+    if len(title) <= max_length:
+        return title
+
+    return title[:max_length-3] + "..."
 
 # Create the workbook and register signal handler
 create_workbook()
