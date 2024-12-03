@@ -139,6 +139,39 @@ def aggregate_detailed_usage():
 
 
 
+def get_active_window():
+    """Returns the active window's application name and title."""
+    hwnd = win32gui.GetForegroundWindow()
+    if hwnd and not win32gui.IsIconic(hwnd):  # Check if the window is not minimized
+        _, process_id = win32process.GetWindowThreadProcessId(hwnd)
+        process = psutil.Process(process_id)
+        current_app = process.name()
+        current_title = win32gui.GetWindowText(hwnd)
+        return current_app, current_title
+    elif win32gui.IsIconic(hwnd):
+        print("Current window is minimized. Putting the thread to sleep.")
+    return "Unknown", "No Active Window"
+
+
+def is_excluded_app(current_app, current_title):
+    """Checks if the active window is an excluded app (YouTube, Netflix, VLC, MBC-be x64)."""
+    #print(get_active_window())
+    if 'chrome' in current_app.lower() and ('youtube' in current_title.lower() or 'netflix' in current_title.lower()):
+        print("identified " + current_title.lower())
+        return True
+    if 'vlc' in current_app.lower() or 'mbc-bex64' in current_app.lower() or 'mbc-be' in current_app.lower() or 'mpc-be64' in current_app.lower():
+        print("identified " + current_title.lower())
+        return True
+    return False
+
+
+def track_idle_time():
+    """Tracks the idle time based on mouse position and resets if necessary."""
+    if pyautogui.position() == (0, 0):  # No mouse movement
+        return sleepingTime  # Increment idle time
+    return 0  # Reset idle time if there's activity
+
+
 def track_app_usage():
     last_app = None
     last_title = None
@@ -148,24 +181,12 @@ def track_app_usage():
 
     while not stop_threads:
         try:
-            hwnd = win32gui.GetForegroundWindow()
-            if hwnd:
-                if win32gui.IsIconic(hwnd):  # checks if the current window is minimized
-                    print("Current window is minimized. Putting the thread to sleep.")
-                    time.sleep(sleepingTime)
-                    continue
+            # Get active window and check for exclusions
+            current_app, current_title = get_active_window()
 
-                _, process_id = win32process.GetWindowThreadProcessId(hwnd)
-                process = psutil.Process(process_id)
-                current_app = process.name()
-                current_title = truncate_title(win32gui.GetWindowText(hwnd))
-
-                # Check if YouTube or Netflix is open on Chrome, exclude idle time in this case
-                if 'chrome' in current_app.lower() and ('youtube' in current_title.lower() or 'netflix' in current_title.lower()):
-                    idle_time = 0  # Reset idle time when YouTube/Netflix is open
-
-            else:
-                current_app, current_title = "Unknown", "No Active Window"
+            # Check if the active app is excluded (YouTube, Netflix, VLC, or MBC-be x64)
+            if is_excluded_app(current_app, current_title):
+                idle_time = 0  # Reset idle time if excluded app is active
 
             current_time = time.time()
 
@@ -189,16 +210,15 @@ def track_app_usage():
                 last_title = current_title
                 start_time = current_time
 
-            # Check for idle time
-            if pyautogui.position() == (0, 0):  # No mouse movement
-                idle_time += sleepingTime
-            else:
-                idle_time = 0  # Reset idle time if there's activity
+            # Track idle time
+            idle_time += track_idle_time()
 
             if idle_time >= max_idle_time:
                 print("[INFO] PC is idle for more than 1 minute.")
-                # Don't log anything during idle time
-                start_time = None  # Reset start time while idle
+                # Log the idle time if conditions allow
+                if not is_excluded_app(current_app, current_title):
+                    log_usage("Idle", "Idle", idle_time)
+                idle_time = 0  # Reset idle time after logging
 
             time.sleep(sleepingTime)
 
@@ -212,6 +232,8 @@ def track_app_usage():
         if final_duration > 0:
             print(f"[INFO] Final App: {last_app}, Final Title: {last_title}, Final Duration: {format_duration(final_duration)}")
             log_usage(last_app, last_title, final_duration)
+
+
 
 
 
