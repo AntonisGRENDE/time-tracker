@@ -12,8 +12,19 @@ import win32process
 import pyautogui
 
 # Timestamp for the log file
-timestampFile = datetime.now().strftime("%H-%M_%d.%m")
+#timestampFile = datetime.now().strftime("%H-%M_%d.%m")
+timestampFile = datetime.now().strftime("%d.%m")
 file_path = f"app_usage_log_{timestampFile}.xlsx"
+# Consider using a configuration file or environment variables
+SLEEPING_TIME = 2
+MAX_IDLE_TIME = 60
+EXCLUDED_APPS = [
+    'chrome',
+    'vlc',
+    'mbc-bex64',
+    'mbc-be',
+    'mpc-be64'
+]
 print(file_path)
 print("Application is starting at " + str(datetime.now().strftime("%H:%M")))
 
@@ -160,22 +171,21 @@ def get_active_window():
 
 
 def is_excluded_app(current_app, current_title):
-    """Checks if the active window is an excluded app (YouTube, Netflix, VLC, MBC-be x64)."""
-    #print(get_active_window())
-    if 'chrome' in current_app.lower() and ('youtube' in current_title.lower() or 'netflix' in current_title.lower()):
-        #print("identified " + current_title.lower())
-        return True
-    if 'vlc' in current_app.lower() or 'mbc-bex64' in current_app.lower() or 'mbc-be' in current_app.lower() or 'mpc-be64' in current_app.lower():
-        #print("identified " + current_title.lower())
-        return True
-    return False
+    #havent checked if it works
+    return any(
+        excluded.lower() in current_app.lower() or
+        excluded.lower() in current_title.lower()
+        for excluded in EXCLUDED_APPS
+    )
 
 
-def track_idle_time():
+def track_idle_time(last_mouse_position):
     """Tracks the idle time based on mouse position and resets if necessary."""
-    if pyautogui.position() == (0, 0):  # No mouse movement
-        return sleepingTime  # Increment idle time
-    return 0  # Reset idle time if there's activity
+    current_mouse_position = pyautogui.position()
+    if current_mouse_position == last_mouse_position:  # No mouse movement
+        return True, current_mouse_position  # Increment idle time
+    return False, current_mouse_position  # Reset idle time if there's activity
+
 
 
 def track_app_usage():
@@ -183,7 +193,7 @@ def track_app_usage():
     last_title = None
     start_time = None
     idle_time = 0
-    max_idle_time = 60  # In seconds (1 minute)
+    last_mouse_position = pyautogui.position()
 
     while not stop_threads:
         try:
@@ -217,9 +227,13 @@ def track_app_usage():
                 start_time = current_time
 
             # Track idle time
-            idle_time += track_idle_time()
+            is_idle, last_mouse_position = track_idle_time(last_mouse_position)
+            if is_idle:
+                idle_time += sleepingTime
+            else:
+                idle_time = 0  # Reset idle time if there's activity
 
-            if idle_time >= max_idle_time:
+            if idle_time >= MAX_IDLE_TIME:
                 print("[INFO] PC is idle for more than 1 minute.")
                 # Log the idle time if conditions allow
                 if not is_excluded_app(current_app, current_title):
@@ -289,6 +303,7 @@ def time_to_timedelta(time_str):
         print(f"Skipping invalid time format: {time_str}")
         return timedelta()
 
+
 # Function to add the sum of durations to the second sheet
 def add_total_duration_to_sheet(file_path):
     # Open the workbook and select the second sheet
@@ -317,7 +332,7 @@ def add_total_duration_to_sheet(file_path):
     # add total time passed from the start of the program to determine if the app tracking worked correctly (epalithefsi)
     next_row = sheet.max_row + 1
     sheet.cell(row=next_row, column=1, value="Total time passed since start")
-    sheet.cell(row=next_row, column=2, value=format_duration(time.time()-start_time))
+    sheet.cell(row=next_row, column=2, value=format_duration( time.time() - program_start_time) )
 
     # Save the workbook
     wb.save(file_path)
@@ -325,7 +340,8 @@ def add_total_duration_to_sheet(file_path):
 
 
 
-start_time = time.time()
+program_start_time = time.time()
+
 # Create the workbook and register signal handler
 create_workbook()
 signal.signal(signal.SIGINT, signal_handler)
@@ -339,6 +355,6 @@ write_thread.start()
 # Keep the main thread alive
 try:
     while not stop_threads:
-        time.sleep(2)
+        time.sleep(SLEEPING_TIME)
 except KeyboardInterrupt:
     signal_handler(None,None)
