@@ -16,14 +16,14 @@ from threading import Lock
 
 
 #timestamp = datetime.now().strftime("%M.%Y_%H:%m")
-timestampFile = datetime.now().strftime("%H-%M_%m.%Y")  # Month.Year_Hour-Minute
+timestampFile = datetime.now().strftime("%H-%M_%d.%m")
 # Path to the log file
 log_file_path = f"app_usage_log_{timestampFile}.xlsx"
 print (log_file_path)
 print ("application  is starting at " + str(datetime.now().strftime("%H:%M")))
 
 
-print("Current open window:" + win32gui.GetWindowText(win32gui.GetForegroundWindow()))
+print("Current open window: " + win32gui.GetWindowText(win32gui.GetForegroundWindow()))
 
 
 # Initialize usage records and locks
@@ -234,12 +234,6 @@ def aggregate_detailed_usage():
 
     except Exception as e:
         print(f"[Error] Creating detailed summary: {e}")
-
-
-
-# Register the updated signal handler
-signal.signal(signal.SIGINT, signal_handler)
-
 
 
 def track_app_usage():
