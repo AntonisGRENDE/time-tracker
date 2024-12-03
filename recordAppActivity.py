@@ -8,6 +8,7 @@ from openpyxl.utils import get_column_letter
 import psutil
 import win32gui
 import win32process
+import pyautogui
 
 # Timestamp for the log file
 timestampFile = datetime.now().strftime("%H-%M_%d.%m")
@@ -137,16 +138,23 @@ def aggregate_detailed_usage():
         print(f"[Error] Creating detailed summary: {e}")
 
 
+
 def track_app_usage():
-    """Track active window usage."""
     last_app = None
     last_title = None
     start_time = None
+    idle_time = 0
+    max_idle_time = 60  # In seconds (1 minute)
 
     while not stop_threads:
         try:
             hwnd = win32gui.GetForegroundWindow()
             if hwnd:
+                if win32gui.IsIconic(hwnd):  # checks if the current window is minimized
+                    print("Current window is minimized. Putting the thread to sleep.")
+                    time.sleep(sleepingTime)
+                    continue
+
                 _, process_id = win32process.GetWindowThreadProcessId(hwnd)
                 process = psutil.Process(process_id)
                 current_app = process.name()
@@ -161,22 +169,36 @@ def track_app_usage():
 
             current_time = time.time()
 
+            # Initialize tracking for the first app
             if start_time is None:
                 last_app = current_app
                 last_title = current_title
                 start_time = current_time
                 continue
 
+            # Detect app switch or long inactivity
             if current_app != last_app or current_title != last_title:
+                # Log the app usage duration before switching
                 duration = current_time - start_time
                 if duration > 0:
                     print(f"[INFO] App: {last_app}, Title: {last_title}, Duration: {format_duration(duration)}")
-                    log_usage(last_app, last_title, duration)  # Log raw seconds
+                    log_usage(last_app, last_title, duration)
 
                 # Update the app details
                 last_app = current_app
                 last_title = current_title
                 start_time = current_time
+
+            # Check for idle time
+            if pyautogui.position() == (0, 0):  # No mouse movement
+                idle_time += sleepingTime
+            else:
+                idle_time = 0  # Reset idle time if there's activity
+
+            if idle_time >= max_idle_time:
+                print("[INFO] PC is idle for more than 1 minute.")
+                # Don't log anything during idle time
+                start_time = None  # Reset start time while idle
 
             time.sleep(sleepingTime)
 
@@ -184,10 +206,13 @@ def track_app_usage():
             print(f"[Error] {e}")
             time.sleep(sleepingTime)
 
+    # Log final usage when thread stops
     if last_app and start_time:
         final_duration = time.time() - start_time
         if final_duration > 0:
+            print(f"[INFO] Final App: {last_app}, Final Title: {last_title}, Final Duration: {format_duration(final_duration)}")
             log_usage(last_app, last_title, final_duration)
+
 
 
 def log_usage(app_name, app_title, duration):
